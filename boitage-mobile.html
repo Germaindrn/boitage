@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Boitage — Mobile</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #12161B;
+    --panel: #1B2129;
+    --border: #2B333D;
+    --text: #ECEFF3;
+    --text-dim: #8B96A5;
+    --todo: #4C8DFF;
+    --done: #34D399;
+    --accent: #FF8A3D;
+    --danger: #F0577A;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif; overflow:hidden;}
+  #map{position:absolute; inset:0;}
+
+  .street-banner{
+    position:absolute; top:calc(14px + env(safe-area-inset-top)); left:14px; right:14px; z-index:1000;
+    background:var(--panel); border:1px solid var(--border); border-radius:16px;
+    padding:14px 18px; box-shadow:0 10px 28px rgba(0,0,0,.45);
+    display:flex; align-items:center; gap:12px;
+  }
+  .street-banner .pin{ font-size:22px; flex:none; }
+  .street-banner .info{ min-width:0; flex:1; }
+  .street-banner .label{ font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); }
+  .street-banner .name{
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .street-banner.idle .name{ color:var(--text-dim); font-weight:600; font-size:14.5px; }
+
+  .stat-pill{
+    position:absolute; left:14px; bottom:calc(18px + env(safe-area-inset-bottom)); z-index:1000;
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:10px 14px; box-shadow:0 8px 24px rgba(0,0,0,.35);
+    display:flex; align-items:center; gap:10px;
+  }
+  .stat-pill .n{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px; }
+  .stat-pill .l{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.06em; }
+  .stat-pill .bar{ width:56px; height:6px; background:#2B333D; border-radius:3px; overflow:hidden; }
+  .stat-pill .bar-fill{ height:100%; background:var(--done); width:0%; transition:width .4s ease; }
+
+  .fab-col{
+    position:absolute; right:14px; bottom:calc(18px + env(safe-area-inset-bottom)); z-index:1000;
+    display:flex; flex-direction:column; gap:10px; align-items:center;
+  }
+  .fab{
+    width:52px; height:52px; border-radius:50%; border:1px solid var(--border);
+    background:var(--panel); color:var(--text); font-size:21px;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 8px 24px rgba(0,0,0,.4); cursor:pointer;
+    transition:transform .08s ease, background .15s ease;
+  }
+  .fab:active{ transform:scale(.92); }
+  .fab.primary{ background:var(--todo); color:#0B1424; border-color:var(--todo); }
+  .fab.spinning{ animation: spin 1s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .gps-dot{
+    width:18px; height:18px; border-radius:50%;
+    background:var(--todo); border:3px solid #fff;
+    box-shadow:0 0 0 4px rgba(76,141,255,0.35);
+  }
+
+  .toast{
+    position:absolute; top:calc(90px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--border); color:var(--text);
+    padding:9px 16px; border-radius:10px; font-size:13px; z-index:2000;
+    box-shadow:0 8px 24px rgba(0,0,0,.4); opacity:0; pointer-events:none;
+    transition:opacity .25s ease, transform .25s ease; max-width:calc(100vw - 28px); text-align:center;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(4px); }
+
+  .permission-overlay{
+    position:absolute; inset:0; z-index:3000; background:rgba(18,22,27,.96);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:32px; gap:16px;
+  }
+  .permission-overlay .icon{ font-size:44px; }
+  .permission-overlay h2{ font-family:'Space Grotesk',sans-serif; font-size:18px; margin:0; }
+  .permission-overlay p{ color:var(--text-dim); font-size:13.5px; max-width:320px; margin:0; line-height:1.5; }
+  .permission-overlay button{
+    margin-top:8px; font-family:'Inter',sans-serif; font-weight:600; font-size:14px;
+    background:var(--todo); color:#0B1424; border:none; border-radius:12px;
+    padding:14px 26px; cursor:pointer;
+  }
+  .permission-overlay.hidden{ display:none; }
+
+  .fab.small{ width:38px; height:38px; font-size:15px; opacity:.8; }
+
+  .leaflet-popup-content-wrapper{ background:var(--panel); color:var(--text); border-radius:10px; }
+  .leaflet-popup-tip{ background:var(--panel); }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="street-banner idle" id="streetBanner">
+  <span class="pin">📍</span>
+  <div class="info">
+    <div class="label">Vous êtes sur</div>
+    <div class="name" id="streetName">Localisation en cours…</div>
+  </div>
+</div>
+
+<div class="stat-pill">
+  <div>
+    <div class="n" id="statN">0 / 0</div>
+    <div class="l">tronçons faits</div>
+  </div>
+  <div class="bar"><div class="bar-fill" id="statBar"></div></div>
+</div>
+
+<div class="fab-col">
+  <button class="fab small" id="desktopLinkFab" title="Ouvrir la version complète">🖥</button>
+  <button class="fab" id="reloadFab" title="Recharger les rues autour de moi">↻</button>
+  <button class="fab primary" id="recenterFab" title="Recentrer sur ma position">◎</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="permission-overlay" id="permOverlay">
+  <div class="icon">📍</div>
+  <h2>Autoriser la localisation</h2>
+  <p>Boitage a besoin de votre position GPS pour afficher la rue où vous êtes et charger automatiquement les rues autour de vous.</p>
+  <button id="permBtn">Activer le GPS</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* Même base de données que la version complète (index.html) : les rues
+   marquées ici se synchronisent automatiquement dans les deux sens */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDJuymzML_h9dYIj0ItSJO1ct7nmKumtBE",
+  authDomain: "boitage-44366.firebaseapp.com",
+  databaseURL: "https://boitage-44366-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "boitage-44366",
+};
+const PROJECT_KEY = 'default';
+const RADIUS = 350;          // mètres autour de vous, chargés automatiquement
+const EXPAND_TRIGGER = 180;  // au-delà de cette distance du dernier centre chargé, on étend
+
+let fbReady = false;
+try{
+  if(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.databaseURL && window.firebase){
+    firebase.initializeApp(FIREBASE_CONFIG);
+    fbReady = true;
+  }
+}catch(e){ console.error('Firebase init failed', e); }
+
+let memorySegments = {};
+let memoryZones = {};
+
+function reportDbError(context, err){
+  console.error(context, err);
+  const msg = (err && err.message) ? err.message : String(err);
+  toast(`⚠️ BDD (${context}): ${msg}`, 5000);
+}
+
+async function fetchDoneSegments(){
+  if(fbReady){
+    try{
+      const snap = await firebase.database().ref(`boitage/${PROJECT_KEY}/segments`).once('value');
+      return snap.exists() ? snap.val() : {};
+    }catch(e){ reportDbError('lecture', e); return {}; }
+  }
+  return memorySegments;
+}
+async function persistSegmentDone(segId, done){
+  if(done){ memorySegments[segId] = true; } else { delete memorySegments[segId]; }
+  if(fbReady){
+    try{
+      const ref = firebase.database().ref(`boitage/${PROJECT_KEY}/segments/${segId}`);
+      if(done){ await ref.set(true); } else { await ref.remove(); }
+    }catch(e){ reportDbError('écriture', e); }
+  }
+}
+async function addZone(zone){
+  const id = 'z' + Date.now() + Math.floor(Math.random()*1000);
+  memoryZones[id] = zone;
+  if(fbReady){
+    try{ await firebase.database().ref(`boitage/${PROJECT_KEY}/zones/${id}`).set(zone); }
+    catch(e){ reportDbError('zone', e); }
+  }
+}
+
+const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([48.8566, 2.3522], 16);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
+
+const toastEl = document.getElementById('toast');
+function toast(msg, ms=2200){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>toastEl.classList.remove('show'), ms);
+}
+
+let streetLayers = {};
+let doneSegments = {};
+let gpsMarker = null, accuracyCircle = null;
+let lastLoadedCenter = null;
+let firstFixDone = false;
+
+function styleFor(done){ return { color: done ? '#34D399' : '#4C8DFF', weight: 6, opacity: 0.92 }; }
+
+function updateStats(){
+  const ids = Object.keys(streetLayers);
+  const total = ids.length;
+  const done = ids.filter(id => streetLayers[id].done).length;
+  document.getElementById('statN').textContent = `${done} / ${total}`;
+  const pct = total ? Math.round((done/total)*100) : 0;
+  document.getElementById('statBar').style.width = pct + '%';
+}
+
+async function toggleStreet(segId){
+  const entry = streetLayers[segId];
+  if(!entry) return;
+  entry.done = !entry.done;
+  entry.layer.setStyle(styleFor(entry.done));
+  updateStats();
+  await persistSegmentDone(segId, entry.done);
+  if(navigator.vibrate) navigator.vibrate(20);
+}
+
+/* ---- Découpage aux intersections (identique à la version bureau) ---- */
+function buildSegmentsFromOverpass(elements){
+  const nodesById = {}; const ways = [];
+  for(const el of elements){
+    if(el.type === 'node'){ nodesById[el.id] = { lat: el.lat, lon: el.lon }; }
+    else if(el.type === 'way' && el.nodes && el.nodes.length > 1){ ways.push(el); }
+  }
+  const nodeWaySet = {};
+  for(const w of ways){
+    new Set(w.nodes).forEach(nodeId => {
+      if(!nodeWaySet[nodeId]) nodeWaySet[nodeId] = new Set();
+      nodeWaySet[nodeId].add(w.id);
+    });
+  }
+  const segments = [];
+  for(const w of ways){
+    const name = (w.tags && w.tags.name) ? w.tags.name : ('Voie sans nom #' + w.id);
+    let start = 0;
+    for(let i = 1; i < w.nodes.length; i++){
+      const nodeId = w.nodes[i];
+      const isIntersection = nodeWaySet[nodeId] && nodeWaySet[nodeId].size >= 2;
+      const isLast = (i === w.nodes.length - 1);
+      if(isIntersection || isLast){
+        if(i > start){
+          const nodeIds = w.nodes.slice(start, i + 1);
+          const latlngs = nodeIds.map(id => nodesById[id]).filter(Boolean).map(p => [p.lat, p.lon]);
+          if(latlngs.length >= 2){
+            segments.push({ id:`${w.id}:${nodeIds[0]}:${nodeIds[nodeIds.length-1]}`, wayId:w.id, name, latlngs });
+          }
+        }
+        start = i;
+      }
+    }
+  }
+  return segments;
+}
+
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter'
+];
+async function fetchOverpass(query){
+  let lastErr;
+  for(const endpoint of OVERPASS_ENDPOINTS){
+    try{
+      const res = await fetch(endpoint, { method:'POST', body:'data=' + encodeURIComponent(query) });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.json();
+    }catch(err){ lastErr = err; console.warn('Overpass failed:', endpoint, err); }
+  }
+  throw lastErr;
+}
+
+async function loadStreetsAround(lat, lng){
+  const reloadFab = document.getElementById('reloadFab');
+  reloadFab.classList.add('spinning');
+  try{
+    doneSegments = await fetchDoneSegments();
+    const query = `[out:json][timeout:25];
+      way(around:${RADIUS},${lat},${lng})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|pedestrian|service)$"]["highway"!~"^(motorway_link|trunk_link)$"];
+      (._;>;);
+      out body;`;
+    const data = await fetchOverpass(query);
+    let added = 0;
+    if(data.elements && data.elements.length > 0){
+      const segments = buildSegmentsFromOverpass(data.elements);
+      for(const seg of segments){
+        if(streetLayers[seg.id]) continue;
+        const done = !!doneSegments[seg.id];
+        const layer = L.polyline(seg.latlngs, styleFor(done)).addTo(map);
+        layer.on('click', (e) => { L.DomEvent.stopPropagation(e); toggleStreet(seg.id); });
+        streetLayers[seg.id] = { layer, done, name: seg.name };
+        added++;
+      }
+    }
+    lastLoadedCenter = L.latLng(lat, lng);
+    updateStats();
+    await addZone({ lat, lng, radius: RADIUS, ts: Date.now() });
+    subscribeToRemoteChanges();
+    if(added > 0) toast(`${added} nouveaux tronçons chargés.`);
+  }catch(err){
+    console.error(err);
+    toast("⚠️ Impossible de charger les rues (réseau). Réessayez.", 4000);
+  }finally{
+    reloadFab.classList.remove('spinning');
+  }
+}
+
+let remoteUnsub = null;
+function subscribeToRemoteChanges(){
+  if(!fbReady) return;
+  if(remoteUnsub) remoteUnsub();
+  const ref = firebase.database().ref(`boitage/${PROJECT_KEY}/segments`);
+  const handler = (snap) => {
+    doneSegments = snap.exists() ? snap.val() : {};
+    let changed = false;
+    Object.keys(streetLayers).forEach(segId => {
+      const remoteDone = !!doneSegments[segId];
+      if(streetLayers[segId].done !== remoteDone){
+        streetLayers[segId].done = remoteDone;
+        streetLayers[segId].layer.setStyle(styleFor(remoteDone));
+        changed = true;
+      }
+    });
+    if(changed) updateStats();
+  };
+  ref.on('value', handler);
+  remoteUnsub = () => ref.off('value', handler);
+}
+
+/* ---- Distance point → segment (mètres), pour trouver la rue la plus proche ---- */
+function toXY(pt, ref){
+  const R = 6371000;
+  const latRad = ref[0] * Math.PI/180;
+  return {
+    x: R * (pt[1]-ref[1]) * Math.PI/180 * Math.cos(latRad),
+    y: R * (pt[0]-ref[0]) * Math.PI/180
+  };
+}
+function distToSegmentMeters(p, a, b){
+  const P = toXY(p,p), A = toXY(a,p), B = toXY(b,p);
+  const dx = B.x-A.x, dy = B.y-A.y;
+  const len2 = dx*dx + dy*dy;
+  let t = len2 === 0 ? 0 : ((P.x-A.x)*dx + (P.y-A.y)*dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = A.x + t*dx, projY = A.y + t*dy;
+  return Math.hypot(P.x-projX, P.y-projY);
+}
+function nearestStreetName(userLat, userLng){
+  let bestDist = Infinity, bestName = null;
+  Object.values(streetLayers).forEach(seg => {
+    const latlngs = seg.layer.getLatLngs();
+    for(let i = 0; i < latlngs.length - 1; i++){
+      const d = distToSegmentMeters(
+        [userLat, userLng],
+        [latlngs[i].lat, latlngs[i].lng],
+        [latlngs[i+1].lat, latlngs[i+1].lng]
+      );
+      if(d < bestDist){ bestDist = d; bestName = seg.name; }
+    }
+  });
+  return { name: bestName, dist: bestDist };
+}
+
+function updateStreetBanner(lat, lng){
+  const { name, dist } = nearestStreetName(lat, lng);
+  const banner = document.getElementById('streetBanner');
+  const nameEl = document.getElementById('streetName');
+  if(name && dist < 35){
+    banner.classList.remove('idle');
+    nameEl.textContent = name;
+  }else{
+    banner.classList.add('idle');
+    nameEl.textContent = Object.keys(streetLayers).length === 0
+      ? 'Chargement des rues autour de vous…'
+      : 'Aucune rue à proximité';
+  }
+}
+
+/* ---- GPS ---- */
+function updateGpsMarker(lat, lng, accuracy){
+  const latlng = [lat, lng];
+  if(!gpsMarker){
+    const icon = L.divIcon({ className:'', html:'<div class="gps-dot"></div>', iconSize:[18,18] });
+    gpsMarker = L.marker(latlng, { icon, zIndexOffset:1000 }).addTo(map);
+    accuracyCircle = L.circle(latlng, { radius:accuracy, color:'#4C8DFF', weight:1, fillOpacity:0.08 }).addTo(map);
+  }else{
+    gpsMarker.setLatLng(latlng);
+    accuracyCircle.setLatLng(latlng);
+    accuracyCircle.setRadius(accuracy);
+  }
+}
+
+function distanceMeters(a, b){
+  const R = 6371000;
+  const dLat = (b.lat-a.lat) * Math.PI/180;
+  const dLng = (b.lng-a.lng) * Math.PI/180;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+async function onPosition(pos){
+  const { latitude, longitude, accuracy } = pos.coords;
+  updateGpsMarker(latitude, longitude, accuracy || 20);
+  updateStreetBanner(latitude, longitude);
+
+  if(!firstFixDone){
+    firstFixDone = true;
+    map.setView([latitude, longitude], 17);
+    await loadStreetsAround(latitude, longitude);
+    updateStreetBanner(latitude, longitude);
+    return;
+  }
+
+  if(lastLoadedCenter){
+    const d = distanceMeters(lastLoadedCenter, L.latLng(latitude, longitude));
+    if(d > EXPAND_TRIGGER){
+      loadStreetsAround(latitude, longitude); // ne bloque pas le suivi GPS
+    }
+  }
+}
+
+function onPositionError(err){
+  console.error(err);
+  toast("⚠️ GPS indisponible : " + err.message, 4000);
+}
+
+function startGps(){
+  document.getElementById('permOverlay').classList.add('hidden');
+  if(!navigator.geolocation){
+    toast("La géolocalisation n'est pas disponible sur cet appareil.");
+    return;
+  }
+  navigator.geolocation.watchPosition(onPosition, onPositionError, {
+    enableHighAccuracy:true, maximumAge:3000, timeout:15000
+  });
+}
+
+document.getElementById('permBtn').addEventListener('click', startGps);
+
+document.getElementById('recenterFab').addEventListener('click', () => {
+  if(gpsMarker) map.setView(gpsMarker.getLatLng(), 17);
+});
+document.getElementById('reloadFab').addEventListener('click', () => {
+  if(gpsMarker) loadStreetsAround(gpsMarker.getLatLng().lat, gpsMarker.getLatLng().lng);
+  else toast('En attente du signal GPS…');
+});
+document.getElementById('desktopLinkFab').addEventListener('click', () => {
+  location.href = 'index.html?desktop=1';
+});
+
+// Tente de démarrer directement (le navigateur affichera sa propre demande
+// d'autorisation) ; le bandeau reste affiché en repli si l'utilisateur doit
+// cliquer explicitement (Safari iOS exige un geste utilisateur).
+if(navigator.permissions && navigator.permissions.query){
+  navigator.permissions.query({ name:'geolocation' }).then(status => {
+    if(status.state === 'granted'){ startGps(); }
+  }).catch(() => {});
+}
+</script>
+</body>
+</html>
