@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Boitage — Carte de tournée</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #12161B;
+    --panel: #1B2129;
+    --panel-2: #212832;
+    --border: #2B333D;
+    --text: #ECEFF3;
+    --text-dim: #8B96A5;
+    --todo: #4C8DFF;
+    --done: #34D399;
+    --accent: #FF8A3D;
+    --danger: #F0577A;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;}
+  #map{position:absolute; inset:0;}
+  body.map-hidden #map{ display:none; }
+
+  .topbar{
+    position:absolute; top:0; left:0; right:0; z-index:1000;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:12px 14px;
+    background:linear-gradient(180deg, rgba(18,22,27,.97), rgba(18,22,27,.8) 70%, transparent);
+    pointer-events:none;
+  }
+  .topbar > *{ pointer-events:auto; }
+
+  .brand{
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:15px;
+    letter-spacing:.02em; white-space:nowrap; margin-right:4px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);}
+
+  .search-wrap{ flex:1; display:flex; gap:8px; min-width:120px; }
+  input[type="text"]{
+    flex:1; min-width:0;
+    background:var(--panel); border:1px solid var(--border); color:var(--text);
+    padding:10px 12px; border-radius:10px; font-size:14px; font-family:'Inter',sans-serif;
+    outline:none;
+  }
+  input[type="text"]:focus{ border-color:var(--todo); }
+
+  .radius-wrap{
+    display:flex; align-items:center; gap:6px;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:6px 10px; white-space:nowrap;
+  }
+  .radius-wrap label{ font-size:12px; color:var(--text-dim); }
+  input[type="number"]{
+    width:60px; background:transparent; border:none; color:var(--text);
+    font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; outline:none;
+  }
+  .radius-wrap span.unit{ font-size:12px; color:var(--text-dim); }
+
+  button{
+    font-family:'Inter',sans-serif; font-weight:600; font-size:13px;
+    border:1px solid var(--border); background:var(--panel); color:var(--text);
+    padding:10px 12px; border-radius:10px; cursor:pointer; white-space:nowrap;
+    display:flex; align-items:center; gap:6px;
+    transition:transform .08s ease, background .15s ease, border-color .15s ease;
+  }
+  button:hover{ background:var(--panel-2); border-color:#3A4552; }
+  button:active{ transform:scale(.96); }
+  button.primary{ background:var(--todo); border-color:var(--todo); color:#0B1424; }
+  button.primary:hover{ filter:brightness(1.08); }
+  button.ghost{ background:transparent; }
+  button:disabled{ opacity:.45; cursor:default; }
+
+  .hint{
+    position:absolute; top:64px; left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--border); color:var(--text-dim);
+    padding:8px 14px; border-radius:10px; font-size:12.5px; z-index:900;
+    box-shadow:0 8px 24px rgba(0,0,0,.3); pointer-events:none;
+    transition:opacity .3s ease;
+  }
+  .hint.hidden{ opacity:0; }
+
+  .bottom-panel{
+    position:absolute; left:14px; bottom:14px; z-index:1000;
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:14px 16px; display:flex; align-items:center; gap:16px;
+    box-shadow:0 8px 24px rgba(0,0,0,.35);
+    max-width:calc(100vw - 28px);
+  }
+  .gauge-wrap{ position:relative; width:64px; height:64px; flex:none; }
+  .gauge-wrap svg{ transform:rotate(-90deg); }
+  .gauge-track{ fill:none; stroke:#2B333D; stroke-width:6; }
+  .gauge-fill{ fill:none; stroke:var(--done); stroke-width:6; stroke-linecap:round; transition:stroke-dashoffset .4s ease; }
+  .gauge-label{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:14px;
+  }
+  .stats{ display:flex; flex-direction:column; gap:2px; }
+  .stats .n{ font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:13px; }
+  .stats .l{ font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.06em; }
+  .legend{ display:flex; flex-direction:column; gap:6px; margin-left:6px; padding-left:16px; border-left:1px solid var(--border); }
+  .legend-row{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-dim); }
+  .swatch{ width:16px; height:4px; border-radius:2px; }
+
+  .side-panel{
+    position:absolute; top:64px; right:14px; bottom:14px; z-index:900;
+    width:290px; max-width:calc(100vw - 28px);
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    box-shadow:0 8px 24px rgba(0,0,0,.35);
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  body.map-hidden .side-panel{ width:min(520px, calc(100vw - 28px)); left:50%; right:auto; transform:translateX(-50%); top:120px; }
+  .side-panel-header{
+    padding:14px 16px 10px; border-bottom:1px solid var(--border);
+    display:flex; align-items:baseline; justify-content:space-between;
+  }
+  .side-panel-header .title{ font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; }
+  .side-panel-header .count{ font-size:12px; color:var(--done); font-weight:600; }
+  .street-list{ overflow-y:auto; padding:8px 10px; flex:1; }
+  .street-item{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:8px 8px; border-radius:8px; font-size:13px;
+  }
+  .street-item + .street-item{ border-top:1px solid rgba(255,255,255,0.04); }
+  .street-item.complete .street-name{ color:var(--done); }
+  .street-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .street-frac{ font-family:'Space Grotesk',sans-serif; font-size:11.5px; color:var(--text-dim); flex:none; }
+  .street-item.complete .street-frac{ color:var(--done); }
+  .empty-note{ padding:16px; font-size:12.5px; color:var(--text-dim); text-align:center; }
+
+  .config-banner{
+    position:absolute; top:64px; left:50%; transform:translateX(-50%); z-index:1500;
+    background:#3A2A1A; border:1px solid #6B4A25; color:#F5D9AE;
+    padding:10px 16px; border-radius:10px; font-size:12.5px; max-width:min(520px, calc(100vw - 28px));
+    box-shadow:0 8px 24px rgba(0,0,0,.4);
+  }
+  .config-banner code{ background:rgba(0,0,0,.25); padding:1px 5px; border-radius:4px; }
+  .config-banner .close{ float:right; cursor:pointer; opacity:.7; margin-left:10px; }
+
+  .toast{
+    position:absolute; top:64px; left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--border); color:var(--text);
+    padding:9px 14px; border-radius:10px; font-size:13px; z-index:2000;
+    box-shadow:0 8px 24px rgba(0,0,0,.4); opacity:0; pointer-events:none;
+    transition:opacity .25s ease, transform .25s ease;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(4px); }
+
+  .leaflet-popup-content-wrapper{ background:var(--panel); color:var(--text); border-radius:10px; }
+  .leaflet-popup-tip{ background:var(--panel); }
+
+  @media (max-width: 560px){
+    .brand span.txt{ display:none; }
+    .legend{ display:none; }
+    .bottom-panel{ padding:10px 12px; }
+    .side-panel{ top:auto; bottom:100px; height:40vh; }
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span><span class="txt">Boitage</span></div>
+  <div class="search-wrap">
+    <input type="text" id="searchInput" placeholder="Chercher une adresse ou une ville…">
+  </div>
+  <div class="radius-wrap">
+    <label for="radiusInput">Rayon</label>
+    <input type="number" id="radiusInput" value="250" min="50" max="2000" step="50">
+    <span class="unit">m</span>
+  </div>
+  <button id="loadBtn" class="primary">Charger les rues</button>
+  <button id="newPointBtn" class="ghost" title="Replacer le point de départ">↺ Nouveau point</button>
+  <button id="toggleMapBtn" class="ghost" title="Masquer la carte">🗺 Masquer la carte</button>
+  <button id="wipeBtn" class="ghost" title="Effacer toutes les zones et tronçons" style="border-color:var(--danger); color:var(--danger);">🗑 Réinitialiser tout</button>
+</div>
+
+<div class="hint" id="hint">📍 Cliquez sur la carte pour placer votre point de départ</div>
+<div class="config-banner" id="configBanner" style="display:none;">
+  <span class="close" id="configBannerClose">✕</span>
+  Aucune base de données connectée : vos marquages sont sauvegardés localement pour cette session seulement.
+  Pour les garder entre appareils une fois le site publié sur GitHub, ouvrez le fichier et renseignez
+  <code>FIREBASE_CONFIG</code> en haut du script avec les clés d'un projet Firebase gratuit
+  (Realtime Database, mode test).
+</div>
+
+<div class="side-panel">
+  <div class="side-panel-header">
+    <span class="title">Rues complètes</span>
+    <span class="count" id="completeCount">0</span>
+  </div>
+  <div class="street-list" id="streetListItems">
+    <div class="empty-note">Chargez une zone pour voir la liste des rues.</div>
+  </div>
+</div>
+
+<div class="bottom-panel">
+  <div class="gauge-wrap">
+    <svg width="64" height="64" viewBox="0 0 64 64">
+      <circle class="gauge-track" cx="32" cy="32" r="27"></circle>
+      <circle class="gauge-fill" id="gaugeFill" cx="32" cy="32" r="27" stroke-dasharray="169.6" stroke-dashoffset="169.6"></circle>
+    </svg>
+    <div class="gauge-label" id="gaugeLabel">0%</div>
+  </div>
+  <div class="stats">
+    <div class="n" id="statDone">0 / 0</div>
+    <div class="l">tronçons faits</div>
+    <button id="resetBtn" class="ghost" style="margin-top:6px; padding:5px 8px; font-size:11px;">Tout remettre à zéro</button>
+  </div>
+  <div class="legend">
+    <div class="legend-row"><span class="swatch" style="background:var(--todo)"></span>À faire</div>
+    <div class="legend-row"><span class="swatch" style="background:var(--done)"></span>Fait ✓</div>
+    <div class="legend-row" style="max-width:170px;">Pointillés gris = zone déjà explorée un autre jour</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* =========================================================================
+   CONFIGURATION BASE DE DONNÉES (Firebase Realtime Database — gratuit)
+   -------------------------------------------------------------------------
+   1) Allez sur https://console.firebase.google.com, créez un projet.
+   2) Ajoutez une "Realtime Database" (mode test pour démarrer).
+   3) Dans Paramètres du projet > Général, copiez la config "SDK setup"
+      et collez les valeurs ci-dessous.
+   4) Publiez ce fichier tel quel sur GitHub Pages : toute personne qui
+      ouvre le site lira/écrira dans la même base, donc les rues faites
+      restent visibles en changeant d'appareil ou de navigateur.
+   Tant que ces champs sont vides, l'app fonctionne quand même (stockage
+   local à cette session/cet appareil uniquement).
+   ========================================================================= */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDJuymzML_h9dYIj0ItSJO1ct7nmKumtBE",
+  authDomain: "boitage-44366.firebaseapp.com",
+  databaseURL: "https://boitage-44366-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "boitage-44366",
+};
+const PROJECT_KEY = 'default'; // changez si plusieurs équipes partagent la même base
+
+let fbReady = false;
+try{
+  if(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.databaseURL && window.firebase){
+    firebase.initializeApp(FIREBASE_CONFIG);
+    fbReady = true;
+  }
+}catch(e){ console.error('Firebase init failed', e); fbReady = false; }
+
+let memorySegments = {};
+let memoryZones = {};
+
+function reportDbError(context, err){
+  console.error(context, err);
+  const msg = (err && err.message) ? err.message : String(err);
+  toast(`⚠️ Erreur base de données (${context}) : ${msg}`, 5000);
+}
+
+async function fetchDoneSegments(){
+  if(fbReady){
+    try{
+      const snap = await firebase.database().ref(`boitage/${PROJECT_KEY}/segments`).once('value');
+      return snap.exists() ? snap.val() : {};
+    }catch(e){ reportDbError('lecture tronçons', e); return {}; }
+  }
+  try{
+    const res = await window.storage.get(`boitage:${PROJECT_KEY}:segments`, true);
+    return res ? JSON.parse(res.value) : {};
+  }catch(e){ return memorySegments; }
+}
+
+async function persistSegmentDone(segId, done){
+  if(done){ memorySegments[segId] = true; } else { delete memorySegments[segId]; }
+  if(fbReady){
+    try{
+      const ref = firebase.database().ref(`boitage/${PROJECT_KEY}/segments/${segId}`);
+      if(done){ await ref.set(true); } else { await ref.remove(); }
+    }catch(e){ reportDbError('écriture tronçon', e); }
+    return;
+  }
+  try{ await window.storage.set(`boitage:${PROJECT_KEY}:segments`, JSON.stringify(memorySegments), true); }
+  catch(e){ /* reste en mémoire seulement pour cette session */ }
+}
+
+// Une "zone" = un point + rayon déjà chargé un jour donné. On garde
+// l'historique complet pour (1) ne jamais reperdre une zone explorée
+// et (2) l'afficher en pointillés gris afin de ne pas repasser dessus.
+async function fetchZones(){
+  if(fbReady){
+    try{
+      const snap = await firebase.database().ref(`boitage/${PROJECT_KEY}/zones`).once('value');
+      return snap.exists() ? snap.val() : {};
+    }catch(e){ reportDbError('lecture zones', e); return {}; }
+  }
+  try{
+    const res = await window.storage.get(`boitage:${PROJECT_KEY}:zones`, true);
+    return res ? JSON.parse(res.value) : {};
+  }catch(e){ return memoryZones; }
+}
+
+async function addZone(zone){
+  const id = 'z' + Date.now() + Math.floor(Math.random()*1000);
+  memoryZones[id] = zone;
+  if(fbReady){
+    try{ await firebase.database().ref(`boitage/${PROJECT_KEY}/zones/${id}`).set(zone); }
+    catch(e){ reportDbError('écriture zone', e); }
+    return;
+  }
+  try{ await window.storage.set(`boitage:${PROJECT_KEY}:zones`, JSON.stringify(memoryZones), true); }
+  catch(e){ /* mémoire seulement */ }
+}
+
+async function wipeAllData(){
+  memorySegments = {};
+  memoryZones = {};
+  if(fbReady){
+    try{
+      await firebase.database().ref(`boitage/${PROJECT_KEY}/segments`).remove();
+      await firebase.database().ref(`boitage/${PROJECT_KEY}/zones`).remove();
+    }catch(e){ reportDbError('réinitialisation', e); }
+    return;
+  }
+  try{
+    await window.storage.delete(`boitage:${PROJECT_KEY}:segments`, true);
+    await window.storage.delete(`boitage:${PROJECT_KEY}:zones`, true);
+  }catch(e){ /* mémoire seulement */ }
+}
+
+if(!fbReady){
+  document.getElementById('configBanner').style.display = 'block';
+}
+document.getElementById('configBannerClose').addEventListener('click', () => {
+  document.getElementById('configBanner').style.display = 'none';
+});
+
+/* ========================================================================= */
+
+const map = L.map('map', { zoomControl:false }).setView([48.8566, 2.3522], 15);
+L.control.zoom({ position:'bottomright' }).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 20,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+const toastEl = document.getElementById('toast');
+function toast(msg, ms=2400){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>toastEl.classList.remove('show'), ms);
+}
+
+let streetLayers = {};   // segId -> {layer, done, name, wayId}
+let doneSegments = {};   // segId -> true, provenant de la BDD
+let centerMarker = null;
+let centerCircle = null;
+let pastZoneCircles = []; // cercles gris = zones déjà chargées (jours précédents)
+
+const radiusInput = document.getElementById('radiusInput');
+const hintEl = document.getElementById('hint');
+
+function currentRadius(){
+  const v = parseInt(radiusInput.value, 10);
+  return (isNaN(v) || v < 20) ? 250 : v;
+}
+
+function drawPastZoneCircle(lat, lng, radius){
+  const c = L.circle([lat, lng], {
+    radius, color:'#5B6472', weight:1.5, dashArray:'4,6', fillOpacity:0.03, interactive:false
+  }).addTo(map);
+  pastZoneCircles.push(c);
+}
+
+function setCenter(latlng){
+  hintEl.classList.add('hidden');
+  if(!centerMarker){
+    centerMarker = L.marker(latlng, { draggable:true }).addTo(map)
+      .bindTooltip('Point de départ — glissez pour déplacer', { permanent:false });
+    centerMarker.on('drag', (e) => { centerCircle.setLatLng(e.target.getLatLng()); });
+  }else{
+    centerMarker.setLatLng(latlng);
+  }
+  if(!centerCircle){
+    centerCircle = L.circle(latlng, {
+      radius: currentRadius(), color:'#FF8A3D', weight:2, fillColor:'#FF8A3D', fillOpacity:0.07
+    }).addTo(map);
+  }else{
+    centerCircle.setLatLng(latlng);
+  }
+}
+
+map.on('click', (e) => setCenter(e.latlng));
+
+radiusInput.addEventListener('input', () => {
+  if(centerCircle) centerCircle.setRadius(currentRadius());
+});
+
+function updateStats(){
+  const ids = Object.keys(streetLayers);
+  const total = ids.length;
+  const done = ids.filter(id => streetLayers[id].done).length;
+  document.getElementById('statDone').textContent = `${done} / ${total}`;
+  const pct = total ? Math.round((done/total)*100) : 0;
+  document.getElementById('gaugeLabel').textContent = pct + '%';
+  const circumference = 169.6;
+  const offset = circumference - (pct/100)*circumference;
+  document.getElementById('gaugeFill').style.strokeDashoffset = offset;
+}
+
+function styleFor(done){
+  return { color: done ? '#34D399' : '#4C8DFF', weight: 5, opacity: 0.9 };
+}
+
+function renderStreetList(){
+  const groups = {}; // name -> {total, done}
+  Object.values(streetLayers).forEach(seg => {
+    const key = seg.name;
+    if(!groups[key]) groups[key] = { total:0, done:0 };
+    groups[key].total++;
+    if(seg.done) groups[key].done++;
+  });
+  const names = Object.keys(groups).sort((a,b) => a.localeCompare(b, 'fr'));
+  const listEl = document.getElementById('streetListItems');
+  listEl.innerHTML = '';
+
+  if(names.length === 0){
+    const div = document.createElement('div');
+    div.className = 'empty-note';
+    div.textContent = 'Chargez une zone pour voir la liste des rues.';
+    listEl.appendChild(div);
+  }
+
+  let completeCount = 0;
+  names.forEach(name => {
+    const g = groups[name];
+    const complete = g.done === g.total;
+    if(complete) completeCount++;
+    const item = document.createElement('div');
+    item.className = 'street-item' + (complete ? ' complete' : '');
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'street-name';
+    nameSpan.textContent = (complete ? '✓ ' : '') + name;
+    const fracSpan = document.createElement('span');
+    fracSpan.className = 'street-frac';
+    fracSpan.textContent = `${g.done}/${g.total}`;
+    item.appendChild(nameSpan);
+    item.appendChild(fracSpan);
+    listEl.appendChild(item);
+  });
+  document.getElementById('completeCount').textContent = completeCount + ' / ' + names.length;
+}
+
+async function toggleStreet(segId){
+  const entry = streetLayers[segId];
+  if(!entry) return;
+  entry.done = !entry.done;
+  entry.layer.setStyle(styleFor(entry.done));
+  updateStats();
+  renderStreetList();
+  await persistSegmentDone(segId, entry.done);
+}
+
+function clearLoadedStreets(){
+  Object.values(streetLayers).forEach(e => map.removeLayer(e.layer));
+  streetLayers = {};
+  updateStats();
+  renderStreetList();
+}
+
+/* ---- Découpage des rues aux intersections ---------------------------- */
+function buildSegmentsFromOverpass(elements){
+  const nodesById = {};
+  const ways = [];
+  for(const el of elements){
+    if(el.type === 'node'){ nodesById[el.id] = { lat: el.lat, lon: el.lon }; }
+    else if(el.type === 'way' && el.nodes && el.nodes.length > 1){ ways.push(el); }
+  }
+  // compte, pour chaque nœud, combien de rues DISTINCTES le traversent
+  const nodeWaySet = {};
+  for(const w of ways){
+    const uniqueNodes = new Set(w.nodes);
+    uniqueNodes.forEach(nodeId => {
+      if(!nodeWaySet[nodeId]) nodeWaySet[nodeId] = new Set();
+      nodeWaySet[nodeId].add(w.id);
+    });
+  }
+
+  const segments = [];
+  for(const w of ways){
+    const name = (w.tags && w.tags.name) ? w.tags.name : ('Voie sans nom #' + w.id);
+    let start = 0;
+    for(let i = 1; i < w.nodes.length; i++){
+      const nodeId = w.nodes[i];
+      const isIntersection = nodeWaySet[nodeId] && nodeWaySet[nodeId].size >= 2;
+      const isLast = (i === w.nodes.length - 1);
+      if(isIntersection || isLast){
+        if(i > start){
+          const nodeIds = w.nodes.slice(start, i + 1);
+          const latlngs = nodeIds.map(id => nodesById[id]).filter(Boolean).map(p => [p.lat, p.lon]);
+          if(latlngs.length >= 2){
+            segments.push({
+              id: `${w.id}:${nodeIds[0]}:${nodeIds[nodeIds.length-1]}`,
+              wayId: w.id,
+              name,
+              latlngs
+            });
+          }
+        }
+        start = i;
+      }
+    }
+  }
+  return segments;
+}
+
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter'
+];
+
+async function fetchOverpass(query){
+  let lastErr;
+  for(const endpoint of OVERPASS_ENDPOINTS){
+    try{
+      const res = await fetch(endpoint, { method:'POST', body: 'data=' + encodeURIComponent(query) });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.json();
+    }catch(err){
+      lastErr = err;
+      console.warn('Overpass endpoint failed:', endpoint, err);
+    }
+  }
+  throw lastErr;
+}
+
+async function fetchAndMergeStreets(lat, lng, radius){
+  const query = `[out:json][timeout:25];
+    way(around:${radius},${lat},${lng})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|pedestrian|service)$"]["highway"!~"^(motorway_link|trunk_link)$"];
+    (._;>;);
+    out body;`;
+
+  const data = await fetchOverpass(query);
+  if(!data.elements || data.elements.length === 0) return 0;
+
+  const segments = buildSegmentsFromOverpass(data.elements);
+  let added = 0;
+  for(const seg of segments){
+    if(streetLayers[seg.id]) continue; // déjà chargé via une autre zone qui chevauche
+    const done = !!doneSegments[seg.id];
+    const layer = L.polyline(seg.latlngs, styleFor(done)).addTo(map);
+
+    layer.on('mouseover', () => layer.setStyle({ weight: 7 }));
+    layer.on('mouseout', () => layer.setStyle({ weight: 5 }));
+    layer.on('click', (e) => { L.DomEvent.stopPropagation(e); toggleStreet(seg.id); });
+    layer.bindTooltip(seg.name, { sticky:true, opacity:0.9 });
+
+    streetLayers[seg.id] = { layer, done, name: seg.name, wayId: seg.wayId };
+    added++;
+  }
+  return added;
+}
+
+function finalizeZone(lat, lng, radius){
+  // le point actif devient une zone "couverte" permanente (cercle gris),
+  // ce qui libère aussitôt un nouveau clic pour démarrer un autre jour.
+  if(centerCircle){
+    map.removeLayer(centerCircle);
+    centerCircle = null;
+  }
+  if(centerMarker){
+    map.removeLayer(centerMarker);
+    centerMarker = null;
+  }
+  drawPastZoneCircle(lat, lng, radius);
+  hintEl.classList.remove('hidden');
+}
+
+async function loadStreets(){
+  if(!centerMarker){
+    toast("Cliquez d'abord sur la carte pour placer un point de départ.");
+    return;
+  }
+  const { lat, lng } = centerMarker.getLatLng();
+  const radius = currentRadius();
+  const loadBtn = document.getElementById('loadBtn');
+  loadBtn.disabled = true;
+  loadBtn.textContent = 'Chargement…';
+
+  try{
+    doneSegments = await fetchDoneSegments();
+    const added = await fetchAndMergeStreets(lat, lng, radius);
+
+    updateStats();
+    renderStreetList();
+    finalizeZone(lat, lng, radius);
+    await addZone({ lat, lng, radius, ts: Date.now() });
+    subscribeToRemoteChanges();
+
+    if(added === 0){
+      toast('Aucune nouvelle rue ici (zone déjà chargée ou vide).');
+    }else{
+      toast(`${added} nouveaux tronçons — ${Object.keys(streetLayers).length} au total. Cliquez sur la carte pour un nouveau point.`);
+    }
+  }catch(err){
+    console.error(err);
+    toast("Erreur de chargement des rues. Réessayez dans un instant.");
+  }finally{
+    loadBtn.disabled = false;
+    loadBtn.textContent = 'Charger les rues';
+  }
+}
+
+/* Synchronisation en direct entre appareils si Firebase est configuré */
+let remoteUnsub = null;
+function subscribeToRemoteChanges(){
+  if(!fbReady) return;
+  if(remoteUnsub) remoteUnsub();
+  const ref = firebase.database().ref(`boitage/${PROJECT_KEY}/segments`);
+  const handler = (snap) => {
+    doneSegments = snap.exists() ? snap.val() : {};
+    let changed = false;
+    Object.keys(streetLayers).forEach(segId => {
+      const remoteDone = !!doneSegments[segId];
+      if(streetLayers[segId].done !== remoteDone){
+        streetLayers[segId].done = remoteDone;
+        streetLayers[segId].layer.setStyle(styleFor(remoteDone));
+        changed = true;
+      }
+    });
+    if(changed){ updateStats(); renderStreetList(); }
+  };
+  ref.on('value', handler);
+  remoteUnsub = () => ref.off('value', handler);
+}
+
+document.getElementById('loadBtn').addEventListener('click', loadStreets);
+
+document.getElementById('newPointBtn').addEventListener('click', () => {
+  if(centerMarker){ map.removeLayer(centerMarker); centerMarker = null; }
+  if(centerCircle){ map.removeLayer(centerCircle); centerCircle = null; }
+  hintEl.classList.remove('hidden');
+  toast('Cliquez sur la carte pour placer un nouveau point de départ.');
+});
+
+document.getElementById('toggleMapBtn').addEventListener('click', (e) => {
+  const hidden = document.body.classList.toggle('map-hidden');
+  e.currentTarget.textContent = hidden ? '🗺 Afficher la carte' : '🗺 Masquer la carte';
+});
+
+document.getElementById('wipeBtn').addEventListener('click', async () => {
+  const total = Object.keys(streetLayers).length;
+  if(!confirm(`Effacer TOUTES les zones et TOUS les tronçons (faits ou non) enregistrés en base ? Cette action est irréversible.`)) return;
+  await wipeAllData();
+  clearLoadedStreets();
+  pastZoneCircles.forEach(c => map.removeLayer(c));
+  pastZoneCircles = [];
+  if(centerMarker){ map.removeLayer(centerMarker); centerMarker = null; }
+  if(centerCircle){ map.removeLayer(centerCircle); centerCircle = null; }
+  doneSegments = {};
+  hintEl.classList.remove('hidden');
+  toast('Tout a été réinitialisé. Cliquez sur la carte pour repartir de zéro.');
+});
+
+document.getElementById('resetBtn').addEventListener('click', async () => {
+  const ids = Object.keys(streetLayers).filter(id => streetLayers[id].done);
+  if(ids.length === 0){ toast('Rien à réinitialiser.'); return; }
+  if(!confirm(`Marquer ${ids.length} tronçon(s) comme non faits, sur TOUTES les zones chargées ?`)) return;
+  for(const id of ids){
+    streetLayers[id].done = false;
+    streetLayers[id].layer.setStyle(styleFor(false));
+    await persistSegmentDone(id, false);
+  }
+  updateStats();
+  renderStreetList();
+});
+
+const searchInput = document.getElementById('searchInput');
+searchInput.addEventListener('keydown', async (e) => {
+  if(e.key !== 'Enter') return;
+  const q = searchInput.value.trim();
+  if(!q) return;
+  toast('Recherche…');
+  try{
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
+    const results = await res.json();
+    if(results.length === 0){ toast('Adresse introuvable.'); return; }
+    const { lat, lon } = results[0];
+    map.setView([parseFloat(lat), parseFloat(lon)], 16);
+    toast('Zone trouvée — cliquez sur la carte pour placer votre point de départ.');
+  }catch(err){
+    toast('Erreur de recherche.');
+  }
+});
+
+/* Au démarrage : on recharge toutes les zones déjà explorées (utile en
+   changeant d'appareil, et pour voir d'un coup d'œil ce qui est déjà couvert
+   avant de placer le point du jour). */
+(async function initFromSavedZones(){
+  doneSegments = await fetchDoneSegments();
+  const zones = await fetchZones();
+  const zoneIds = Object.keys(zones);
+  if(zoneIds.length === 0) return;
+
+  toast(`Rechargement de ${zoneIds.length} zone(s) déjà explorée(s)…`);
+  let last = null;
+  for(const id of zoneIds){
+    const z = zones[id];
+    if(!z || !z.lat || !z.lng) continue;
+    drawPastZoneCircle(z.lat, z.lng, z.radius || 250);
+    try{ await fetchAndMergeStreets(z.lat, z.lng, z.radius || 250); }
+    catch(e){ console.warn('Zone non rechargée:', z, e); }
+    last = z;
+  }
+  updateStats();
+  renderStreetList();
+  if(last){ map.setView([last.lat, last.lng], 15); }
+  subscribeToRemoteChanges();
+  toast(`${Object.keys(streetLayers).length} tronçons rechargés depuis vos zones précédentes.`);
+})();
+</script>
+</body>
+</html>
