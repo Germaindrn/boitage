@@ -123,7 +123,7 @@
 
 <div class="fab-col">
   <button class="fab small" id="desktopLinkFab" title="Ouvrir la version complète">🖥</button>
-  <button class="fab" id="reloadFab" title="Recharger les rues autour de moi">↻</button>
+  <button class="fab" id="reloadFab" title="Recharger les zones déjà enregistrées">↻</button>
   <button class="fab primary" id="recenterFab" title="Recentrer sur ma position">◎</button>
 </div>
 
@@ -132,8 +132,9 @@
 <div class="permission-overlay" id="permOverlay">
   <div class="icon">📍</div>
   <h2>Autoriser la localisation</h2>
-  <p>Boitage a besoin de votre position GPS pour afficher la rue où vous êtes et charger automatiquement les rues autour de vous.</p>
+  <p>Activez le GPS pour voir la rue où vous vous trouvez et votre position sur la carte. Les rues déjà enregistrées s'affichent de toute façon, GPS ou non.</p>
   <button id="permBtn">Activer le GPS</button>
+  <a href="#" id="skipGpsLink" style="color:var(--text-dim); font-size:12.5px; text-decoration:underline;">Continuer sans GPS</a>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
@@ -149,6 +150,8 @@ const FIREBASE_CONFIG = {
   projectId: "boitage-44366",
 };
 const PROJECT_KEY = 'default';
+/* Le mobile ne crée plus aucune zone : il se contente d'afficher celles déjà
+   enregistrées (créées depuis la version complète) et de cocher les rues. */
 
 let fbReady = false;
 try{
@@ -209,7 +212,6 @@ function toast(msg, ms=2200){
 let streetLayers = {};
 let doneSegments = {};
 let gpsMarker = null, accuracyCircle = null;
-let lastLoadedCenter = null;
 let firstFixDone = false;
 
 function styleFor(done){ return { color: done ? '#34D399' : '#4C8DFF', weight: 6, opacity: 0.92 }; }
@@ -286,36 +288,66 @@ async function fetchOverpass(query){
   throw lastErr;
 }
 
-async function loadStreetsAround(lat, lng){
+async function mergeStreetsForZone(lat, lng, radius){
+  const query = `[out:json][timeout:25];
+    way(around:${radius},${lat},${lng})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|pedestrian|service)$"]["highway"!~"^(motorway_link|trunk_link)$"];
+    (._;>;);
+    out body;`;
+  const data = await fetchOverpass(query);
+  let added = 0;
+  if(data.elements && data.elements.length > 0){
+    const segments = buildSegmentsFromOverpass(data.elements);
+    for(const seg of segments){
+      if(streetLayers[seg.id]) continue; // déjà affiché via une autre zone qui chevauche
+      const done = !!doneSegments[seg.id];
+      const layer = L.polyline(seg.latlngs, styleFor(done)).addTo(map);
+      layer.on('click', (e) => { L.DomEvent.stopPropagation(e); toggleStreet(seg.id); });
+      streetLayers[seg.id] = { layer, done, name: seg.name };
+      added++;
+    }
+  }
+  return added;
+}
+
+/* Recharge l'affichage à partir de ce qui existe déjà en base : aucune
+   nouvelle zone n'est créée ici, on relit juste les zones et tronçons
+   déjà enregistrés (typiquement depuis la version complète). */
+async function loadAllSavedZones(){
   const reloadFab = document.getElementById('reloadFab');
   reloadFab.classList.add('spinning');
   try{
     doneSegments = await fetchDoneSegments();
-    const query = `[out:json][timeout:25];
-      way(around:${RADIUS},${lat},${lng})["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|pedestrian|service)$"]["highway"!~"^(motorway_link|trunk_link)$"];
-      (._;>;);
-      out body;`;
-    const data = await fetchOverpass(query);
-    let added = 0;
-    if(data.elements && data.elements.length > 0){
-      const segments = buildSegmentsFromOverpass(data.elements);
-      for(const seg of segments){
-        if(streetLayers[seg.id]) continue;
-        const done = !!doneSegments[seg.id];
-        const layer = L.polyline(seg.latlngs, styleFor(done)).addTo(map);
-        layer.on('click', (e) => { L.DomEvent.stopPropagation(e); toggleStreet(seg.id); });
-        streetLayers[seg.id] = { layer, done, name: seg.name };
-        added++;
-      }
+    const zones = await fetchZones();
+    const zoneIds = Object.keys(zones);
+    if(zoneIds.length === 0){
+      toast("Aucune zone enregistrée pour l'instant. Créez-en une depuis la version complète.", 4000);
+      return;
     }
-    lastLoadedCenter = L.latLng(lat, lng);
+    toast(`Chargement de ${zoneIds.length} zone(s)…`);
+    let last = null;
+    let failed = [];
+    for(const id of zoneIds){
+      const z = zones[id];
+      if(!z || !z.lat || !z.lng) continue;
+      let ok = false;
+      for(let attempt = 0; attempt < 2 && !ok; attempt++){
+        try{ await mergeStreetsForZone(z.lat, z.lng, z.radius || 250); ok = true; }
+        catch(e){ console.warn('Tentative échouée pour la zone', z, e); }
+      }
+      if(!ok) failed.push(z);
+      last = z;
+    }
     updateStats();
-    await addZone({ lat, lng, radius: RADIUS, ts: Date.now() });
     subscribeToRemoteChanges();
-    if(added > 0) toast(`${added} nouveaux tronçons chargés.`);
+    if(!firstFixDone && last){ map.setView([last.lat, last.lng], 16); }
+    if(failed.length > 0){
+      toast(`⚠️ ${failed.length} zone(s) n'ont pas pu être chargées (réseau). Retentez.`, 5000);
+    }else{
+      toast(`${Object.keys(streetLayers).length} tronçons affichés.`);
+    }
   }catch(err){
     console.error(err);
-    toast("⚠️ Impossible de charger les rues (réseau). Réessayez.", 4000);
+    toast("Erreur de chargement des zones. Réessayez dans un instant.");
   }finally{
     reloadFab.classList.remove('spinning');
   }
@@ -406,14 +438,6 @@ function updateGpsMarker(lat, lng, accuracy){
   }
 }
 
-function distanceMeters(a, b){
-  const R = 6371000;
-  const dLat = (b.lat-a.lat) * Math.PI/180;
-  const dLng = (b.lng-a.lng) * Math.PI/180;
-  const s = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
-
 async function onPosition(pos){
   const { latitude, longitude, accuracy } = pos.coords;
   updateGpsMarker(latitude, longitude, accuracy || 20);
@@ -422,16 +446,6 @@ async function onPosition(pos){
   if(!firstFixDone){
     firstFixDone = true;
     map.setView([latitude, longitude], 17);
-    await loadStreetsAround(latitude, longitude);
-    updateStreetBanner(latitude, longitude);
-    return;
-  }
-
-  if(lastLoadedCenter){
-    const d = distanceMeters(lastLoadedCenter, L.latLng(latitude, longitude));
-    if(d > EXPAND_TRIGGER){
-      loadStreetsAround(latitude, longitude); // ne bloque pas le suivi GPS
-    }
   }
 }
 
@@ -452,13 +466,16 @@ function startGps(){
 }
 
 document.getElementById('permBtn').addEventListener('click', startGps);
+document.getElementById('skipGpsLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('permOverlay').classList.add('hidden');
+});
 
 document.getElementById('recenterFab').addEventListener('click', () => {
   if(gpsMarker) map.setView(gpsMarker.getLatLng(), 17);
 });
 document.getElementById('reloadFab').addEventListener('click', () => {
-  if(gpsMarker) loadStreetsAround(gpsMarker.getLatLng().lat, gpsMarker.getLatLng().lng);
-  else toast('En attente du signal GPS…');
+  loadAllSavedZones();
 });
 document.getElementById('desktopLinkFab').addEventListener('click', () => {
   location.href = 'index.html?desktop=1';
@@ -472,6 +489,10 @@ if(navigator.permissions && navigator.permissions.query){
     if(status.state === 'granted'){ startGps(); }
   }).catch(() => {});
 }
+
+// Affiche les zones et tronçons déjà enregistrés dès l'ouverture, qu'on ait
+// ou non accordé le GPS : le mobile n'a besoin d'aucune position pour ça.
+loadAllSavedZones();
 </script>
 </body>
 </html>
