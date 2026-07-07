@@ -149,8 +149,6 @@ const FIREBASE_CONFIG = {
   projectId: "boitage-44366",
 };
 const PROJECT_KEY = 'default';
-const RADIUS = 350;          // mètres autour de vous, chargés automatiquement
-const EXPAND_TRIGGER = 180;  // au-delà de cette distance du dernier centre chargé, on étend
 
 let fbReady = false;
 try{
@@ -187,13 +185,14 @@ async function persistSegmentDone(segId, done){
     }catch(e){ reportDbError('écriture', e); }
   }
 }
-async function addZone(zone){
-  const id = 'z' + Date.now() + Math.floor(Math.random()*1000);
-  memoryZones[id] = zone;
+async function fetchZones(){
   if(fbReady){
-    try{ await firebase.database().ref(`boitage/${PROJECT_KEY}/zones/${id}`).set(zone); }
-    catch(e){ reportDbError('zone', e); }
+    try{
+      const snap = await firebase.database().ref(`boitage/${PROJECT_KEY}/zones`).once('value');
+      return snap.exists() ? snap.val() : {};
+    }catch(e){ reportDbError('lecture zones', e); return {}; }
   }
+  return memoryZones;
 }
 
 const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([48.8566, 2.3522], 16);
